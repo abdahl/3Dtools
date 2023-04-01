@@ -26,14 +26,12 @@ import scipy.ndimage
 import os
 
 class FiberTracker:
-    def __init__(self, V, int_thres=0.1, d_thres=5, count_thres=5, peak_sigma=2, center_sigma=1.5, momentum=0.1, length_thres=3):
+    def __init__(self, int_thres=0.1, d_thres=5, count_thres=5, peak_sigma=2, center_sigma=1.5, momentum=0.1, length_thres=3):
         '''
         Initialization of the fiber tracker
 
         Parameters
         ----------
-        V : numpy array
-            3D volume where fibers are detected as bright lines on dark background.
         int_thres : float, optional
             Threshold for minimum value of areas containing fibers. The default is 0.1.
         d_thres : float, optional
@@ -58,8 +56,6 @@ class FiberTracker:
         None.
 
         '''
-        self.V = V.astype(float)
-        self.V /= self.V.max()
         self.int_thres = int_thres
         self.d_thres = d_thres**2 # not move more than d_thres pixels (using squared distance)
         self.count_thres = count_thres # minimum number of points in a track
@@ -67,19 +63,33 @@ class FiberTracker:
         self.center_sigma = center_sigma
         self.momentum = momentum
         self.length_thres = length_thres
+
         
-        self.r = None
-        self.c = None
-        self.Cv = None
-        self.find_peaks_vol()
-        
-        self.rr = None
-        self.cc = None
-        self.tracks_all = None
-        self.tracks = None
-        self.track_fibers()
-        
-        
+    def __call__(self, V):
+        '''
+        Call function for FiberTracker
+
+        Parameters
+        ----------
+        V : numpy array
+            3D array of fibers aligned with the first dimension.
+
+        Returns
+        -------
+        list
+            list of numpy arrays each containing coordinates of tracked fibers.
+        numpy array
+            Volume of center points smoothed with center_sigma. Useful for 3D volume rendering.
+
+        '''
+        if V.ndim != 3:
+            print(f'Input volume is {V.ndim}, but should be 3-dimensional!')
+            return 0, 0
+        else:
+            V = V.astype(float)
+            V /= V.max()
+            r, c, Cv = self.find_peaks_vol(V)
+            return self.track_fibers(r, c, V), Cv
         
     def find_peaks(self, im):
         '''
@@ -132,8 +142,8 @@ class FiberTracker:
         ca = np.array(ca)
         rb = np.array(rb)
         cb = np.array(cb)
-        return (ra.reshape(-1,1)@np.ones((1,len(rb))) - np.ones((len(ra),1))@(rb.reshape(1,-1))
-             )**2 + (ca.reshape(-1,1)@np.ones((1,len(cb))) - np.ones((len(ca),1))@(cb.reshape(1,-1)))**2
+        return ((ra.reshape(-1,1)@np.ones((1,len(rb))) - np.ones((len(ra),1))@(rb.reshape(1,-1)))**2 + 
+                (ca.reshape(-1,1)@np.ones((1,len(cb))) - np.ones((len(ca),1))@(cb.reshape(1,-1)))**2)
 
 
     def remove_close_points(self, r, c, im):
@@ -193,7 +203,7 @@ class FiberTracker:
         tr[id_second] = tmp
         return tr
     
-    def find_peaks_vol(self):
+    def find_peaks_vol(self, V):
         '''
         Find peaks in the volume and set the values of r (peak rows coordinates), 
         c (peak column coordinates), and Cv (volume of center coordiantes smoothed 
@@ -204,26 +214,28 @@ class FiberTracker:
         None.
 
         '''
-        self.r = []
-        self.c = []
+        r = []
+        c = []
         cv = []
 
-        for z, v in enumerate(self.V):
+        for z, v in enumerate(V):
             if self.peak_sigma > 0:
                 v = scipy.ndimage.gaussian_filter(v, self.peak_sigma)
             r_out, c_out, cim = self.find_peaks(v)
-            self.r.append(r_out)
-            self.c.append(c_out)
+            r.append(r_out)
+            c.append(c_out)
             if self.center_sigma > 0:
                 cim = scipy.ndimage.gaussian_filter(cim.astype(float), self.center_sigma)
             cv.append(cim)
-        self.Cv = np.stack(cv)
-        self.Cv = (self.Cv/self.Cv.max()*255).astype(np.uint8)
+        Cv = np.stack(cv)
+        Cv = (Cv/Cv.max()*255).astype(np.uint8)
+        
+        return r, c, Cv
 
 
 
 
-    def track_fibers(self):
+    def track_fibers(self, r, c, V):
         '''
         Tracks fibers throughout the volume. Sets the parameters 
             - rr and cc (row and column coordinates where poitns closer than 
@@ -237,30 +249,30 @@ class FiberTracker:
 
         '''
         
-        self.tracks_all = [] # Coordinates
+        tracks_all = [] # Coordinates
         ntr_ct = [] # count of not found points
         
         # remove close points
-        self.rr = []
-        self.cc = []
-        for ra, ca, v in zip(self.r, self.c, self.V):
+        rr = []
+        cc = []
+        for ra, ca, v in zip(r, c, V):
             rra, cca = self.remove_close_points(ra, ca, v)
-            self.rr.append(rra)
-            self.cc.append(cca)
+            rr.append(rra)
+            cc.append(cca)
             
         # initialize tracks (row, col, layer, drow, dcol) and counter for tracks
-        for ra, ca in zip(self.rr[0], self.cc[0]):
-            self.tracks_all.append([(ra, ca, 0, 0, 0)])
+        for ra, ca in zip(rr[0], cc[0]):
+            tracks_all.append([(ra, ca, 0, 0, 0)])
             ntr_ct.append(0)
 
-        coord_r = self.rr[0].copy()
-        coord_c = self.cc[0].copy()
+        coord_r = rr[0].copy()
+        coord_c = cc[0].copy()
         
         nf_counter = 0
-        for i in range(1, len(self.rr)):
+        for i in range(1, len(rr)):
             
             # Match nearest point
-            d = self.get_dist(coord_r, coord_c, self.rr[i], self.cc[i])
+            d = self.get_dist(coord_r, coord_c, rr[i], cc[i])
             
             id_from = d.argmin(axis=0) # id from
             id_to = d.argmin(axis=1) # id to
@@ -271,13 +283,13 @@ class FiberTracker:
             idx = id_match_from == np.arange(len(id_from)) # look up coordinates
             for j in range(len(idx)):
                 if idx[j] and d_from[j] < self.d_thres:
-                    drow = (self.momentum*(self.rr[i][j] - self.tracks_all[id_from[j] + nf_counter][-1][0]) + 
-                            (1-self.momentum)*self.tracks_all[id_from[j] + nf_counter][-1][3])
-                    dcol = (self.momentum*(self.cc[i][j] - self.tracks_all[id_from[j] + nf_counter][-1][1]) +
-                            (1-self.momentum)*self.tracks_all[id_from[j] + nf_counter][-1][4])
-                    self.tracks_all[id_from[j] + nf_counter].append((self.rr[i][j], self.cc[i][j], i, drow, dcol))
+                    drow = (self.momentum*(rr[i][j] - tracks_all[id_from[j] + nf_counter][-1][0]) + 
+                            (1-self.momentum)*tracks_all[id_from[j] + nf_counter][-1][3])
+                    dcol = (self.momentum*(cc[i][j] - tracks_all[id_from[j] + nf_counter][-1][1]) +
+                            (1-self.momentum)*tracks_all[id_from[j] + nf_counter][-1][4])
+                    tracks_all[id_from[j] + nf_counter].append((rr[i][j], cc[i][j], i, drow, dcol))
                 else:
-                    self.tracks_all.append([(self.rr[i][j], self.cc[i][j], i, 0, 0)])
+                    tracks_all.append([(rr[i][j], cc[i][j], i, 0, 0)])
                     ntr_ct.append(0)
                     
             not_matched = np.ones(len(coord_r), dtype=int)
@@ -289,66 +301,23 @@ class FiberTracker:
             coord_r = []
             coord_c = []
                         
-            for j in range(nf_counter, len(self.tracks_all)):
+            for j in range(nf_counter, len(tracks_all)):
                 if ntr_ct[j] > self.count_thres:
                     ntr_ct = self.swap_place(ntr_ct, j, nf_counter)
-                    self.tracks_all = self.swap_place(self.tracks_all, j, nf_counter)
+                    tracks_all = self.swap_place(tracks_all, j, nf_counter)
                     nf_counter += 1
             
-            for j in range(nf_counter, len(self.tracks_all)):
-                coord_r.append(self.tracks_all[j][-1][-5] + (i-self.tracks_all[j][-1][-3])*self.tracks_all[j][-1][-2])
-                coord_c.append(self.tracks_all[j][-1][-4] + (i-self.tracks_all[j][-1][-3])*self.tracks_all[j][-1][-1])
+            for j in range(nf_counter, len(tracks_all)):
+                coord_r.append(tracks_all[j][-1][-5] + (i-tracks_all[j][-1][-3])*tracks_all[j][-1][-2])
+                coord_c.append(tracks_all[j][-1][-4] + (i-tracks_all[j][-1][-3])*tracks_all[j][-1][-1])
         
-        self.tracks = []
-        for track in self.tracks_all:
+        tracks = []
+        for track in tracks_all:
             if len(track) > self.length_thres:
                 track_arr = np.stack(track)
-                self.tracks.append(track_arr[:,:3])
-
-    
-    def save_center_vol(self, file_name):
-        '''
-        Saves volume of center points.
-
-        Parameters
-        ----------
-        file_name : string
-            Output file name.
-
-        Returns
-        -------
-        None.
-
-        '''
-        tifffile.imwrite(file_name, self.Cv)
-
-    def show_tracks(self, n_rand=None):
-        '''
-        Display the tracks_keep as 3D lines.
-
-        Parameters
-        ----------
-        n_rand : integer, optional
-            Option to limit the number of tracks shown. The default is None.
-
-        Returns
-        -------
-        None.
-
-        '''
-        if n_rand == None or n_rand > len(self.tracks):
-            n_rand = len(self.tracks)
-        elif n_rand < 1:
-            n_rand = 1
-
-        rid = np.random.choice(len(self.tracks), n_rand)
-
-        fig = plt.figure()
-        ax = fig.add_subplot(projection='3d')
-        for i in rid:
-            pts = np.stack(self.tracks[i])
-            ax.plot(pts[:,0], pts[:,1], pts[:,2], '-')
-        ax.set_aspect('equal')
+                tracks.append(track_arr[:,:3])
+        
+        return tracks
 
 
 if __name__ == '__main__':
@@ -360,15 +329,23 @@ if __name__ == '__main__':
     dir_name = 'data/'
     dir_name = add_slash(dir_name)
     V = tifffile.imread(f'{dir_name}vol_center_probability.tif')
-    fib_tracker = FiberTracker(V, center_sigma=1, peak_sigma=2, count_thres=50, d_thres=2)
+    fib_tracker = FiberTracker()
+    tracks, Cv = fib_tracker(V)
     
     out_dir = 'results/'
     out_dir = add_slash(out_dir)
     if not os.path.isdir(out_dir):
         os.mkdir(out_dir)
     
-    fib_tracker.save_center_vol(f'{out_dir}center_vol.tif')
-    fib_tracker.show_tracks()
+    tifffile.imwrite(f'{out_dir}center_vol.tif', Cv)
+    
+    n_rand = 100
+    rid = np.random.choice(len(tracks), n_rand)
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+    for i in rid:
+        ax.plot(tracks[i][:,0], tracks[i][:,1], tracks[i][:,2], '-')
+    ax.set_aspect('equal')
 
 
 
