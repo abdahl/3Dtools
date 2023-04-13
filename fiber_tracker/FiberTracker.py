@@ -26,21 +26,21 @@ import scipy.ndimage
 import os
 
 class FiberTracker:
-    def __init__(self, int_thres=0.1, d_thres=5, count_thres=5, peak_sigma=2, center_sigma=1.5, momentum=0.1, length_thres=3):
+    def __init__(self, int_thres=0.1, max_jump=5, max_skip=5, peak_sigma=2, center_sigma=1.5, momentum=0.1, track_min_length=3):
         '''
-        Initialization of the fiber tracker
+        Initialization of the fiber tracker. The fiber tracker tracks fibers in the z-direction.
 
         Parameters
         ----------
         int_thres : float, optional
-            Threshold for minimum value of areas containing fibers. The default is 0.1.
-        d_thres : float, optional
-            Distance threshold in pixels. The default is 5.
-        count_thres : int, optional
-            Minimum number of points in one fiber. The default is 5.
+            Threshold for minimum intensity value of areas containing fibers. The default is 0.1.
+        max_jump : float, optional
+            Maximum distance between detected points in two consecutive frames. Threshold in pixels. The default is 5.
+        max_skip : int, optional
+            Maximum number of frames along one track where no points are detected. The default is 5.
         peak_sigma : float, optional
             Parameter for Gaussian smoothing the input image before finding peaks. 
-            The default is 2. If negative, the no smoothing.
+            The default is 2. If negative, then no smoothing.
         center_sigma : float, optional
             Parameter for Gaussian smoothing center detection points for creating 
             a volume of center lines. The default is 1.5. If negative, the no smoothing.
@@ -48,7 +48,7 @@ class FiberTracker:
             Parameter in the range [0;1] that gives momentum to the tracking direction. 
             The momentum gives the fraction of the current direction that is kept.
             The default is 0.1.
-        length_thres : int, optional
+        track_min_length : int, optional
             Minimum number of points in a track.
 
         Returns
@@ -56,13 +56,29 @@ class FiberTracker:
         None.
 
         '''
-        self.int_thres = int_thres
-        self.d_thres = d_thres**2 # not move more than d_thres pixels (using squared distance)
-        self.count_thres = count_thres # minimum number of points in a track
-        self.peak_sigma = peak_sigma
-        self.center_sigma = center_sigma
-        self.momentum = momentum
-        self.length_thres = length_thres
+        self.int_thres = int_thres # Intensity threshold
+
+        self.max_jump = max_jump**2 # not move more than max_jump pixels (using squared distance)
+        if self.max_jump < 1: # should be at least 1 pixel
+            self.max_jump = 1
+        
+        self.max_skip = max_skip # maximum number of slides that can be skipped in a track. If set to 0, then no slides can be skipped.
+        if self.max_skip < 0:
+            self.max_skip = 0
+
+        self.peak_sigma = peak_sigma # smoothing parameter for detecting points
+
+        self.center_sigma = center_sigma # smooting parameter for visualization of detected points
+
+        self.momentum = momentum # direction momentum that must be between 0 and 1
+        if self.momentum < 0:
+            self.momentum = 0
+        elif self.momentum > 1:
+            self.momentum = 1
+        
+        self.track_min_length = track_min_length # minimum length of tracks that should be at least 1
+        if self.track_min_length < 1:
+            self.track_min_length = 1
 
         
     def __call__(self, V):
@@ -93,6 +109,7 @@ class FiberTracker:
         
     def find_peaks(self, im):
         '''
+        Finds the row and column coordinates of peaks in a 2D image
 
         Parameters
         ----------
@@ -121,6 +138,8 @@ class FiberTracker:
     
     def get_dist(self, ra, ca, rb, cb):
         '''
+        Computes a 2D distance array between row and column coordinates in set a (ra, ca) and set b (rb, cb) 
+
         Parameters
         ----------
         ra : numpy array
@@ -148,6 +167,7 @@ class FiberTracker:
 
     def remove_close_points(self, r, c, im):
         '''
+        Removes points that are closer than max_jump and keeps the point with the highest response.
 
         Parameters
         ----------
@@ -171,9 +191,9 @@ class FiberTracker:
             
         keep = np.ones(len(d), dtype=bool)
         
-        id_thres = np.where(d<self.d_thres)
+        id_max_jump = np.where(d<self.max_jump)
         
-        for ida, idb in zip(id_thres[0], id_thres[1]):
+        for ida, idb in zip(id_max_jump[0], id_max_jump[1]):
             if im[r[ida], c[ida]] > im[r[idb], c[idb]]:
                 keep[idb] = 0
         
@@ -182,6 +202,7 @@ class FiberTracker:
     
     def swap_place(self, tr, id_first, id_second):
         '''
+        Swaps the place of two elements in a list.
 
         Parameters
         ----------
@@ -239,9 +260,9 @@ class FiberTracker:
         '''
         Tracks fibers throughout the volume. Sets the parameters 
             - rr and cc (row and column coordinates where poitns closer than 
-              d_thres have been removed. The point with highes intensity is kept)
+              max_jump have been removed. The point with highes intensity is kept)
             - tracks_all, which is a lsit of all tracked fibers
-            - tracks, which is a list of tracks that are longer than count_thres
+            - tracks, which is a list of tracks that are longer than track_min_length
 
         Returns
         -------
@@ -282,7 +303,7 @@ class FiberTracker:
             id_match_from = id_to[id_from] # matched id from
             idx = id_match_from == np.arange(len(id_from)) # look up coordinates
             for j in range(len(idx)):
-                if idx[j] and d_from[j] < self.d_thres:
+                if idx[j] and d_from[j] < self.max_jump:
                     drow = (self.momentum*(rr[i][j] - tracks_all[id_from[j] + nf_counter][-1][0]) + 
                             (1-self.momentum)*tracks_all[id_from[j] + nf_counter][-1][3])
                     dcol = (self.momentum*(cc[i][j] - tracks_all[id_from[j] + nf_counter][-1][1]) +
@@ -302,7 +323,7 @@ class FiberTracker:
             coord_c = []
                         
             for j in range(nf_counter, len(tracks_all)):
-                if ntr_ct[j] > self.count_thres:
+                if ntr_ct[j] > self.max_skip:
                     ntr_ct = self.swap_place(ntr_ct, j, nf_counter)
                     tracks_all = self.swap_place(tracks_all, j, nf_counter)
                     nf_counter += 1
@@ -313,7 +334,7 @@ class FiberTracker:
         
         tracks = []
         for track in tracks_all:
-            if len(track) > self.length_thres:
+            if len(track) > self.track_min_length:
                 track_arr = np.stack(track)
                 tracks.append(track_arr[:,:3])
         
@@ -340,7 +361,7 @@ if __name__ == '__main__':
     tifffile.imwrite(f'{out_dir}center_vol.tif', Cv)
     
     n_rand = 100
-    rid = np.random.choice(len(tracks), n_rand)
+    rid = np.random.choice(len(tracks), len(tracks))
     fig = plt.figure()
     ax = fig.add_subplot(projection='3d')
     for i in rid:
