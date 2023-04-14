@@ -126,6 +126,8 @@ class FiberTracker:
             2D image of center points
 
         '''        
+        if self.peak_sigma > 0:
+            im = scipy.ndimage.gaussian_filter(im, self.peak_sigma)
         ctim = np.zeros(im.shape)
         
         disp = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]]
@@ -196,6 +198,8 @@ class FiberTracker:
         for ida, idb in zip(id_max_jump[0], id_max_jump[1]):
             if im[r[ida], c[ida]] > im[r[idb], c[idb]]:
                 keep[idb] = 0
+            else:
+                keep[ida] = 0
         
         return r[keep], c[keep]
     
@@ -240,8 +244,6 @@ class FiberTracker:
         cv = []
 
         for z, v in enumerate(V):
-            if self.peak_sigma > 0:
-                v = scipy.ndimage.gaussian_filter(v, self.peak_sigma)
             r_out, c_out, cim = self.find_peaks(v)
             r.append(r_out)
             c.append(c_out)
@@ -331,6 +333,8 @@ class FiberTracker:
             for j in range(nf_counter, len(tracks_all)):
                 coord_r.append(tracks_all[j][-1][-5] + (i-tracks_all[j][-1][-3])*tracks_all[j][-1][-2])
                 coord_c.append(tracks_all[j][-1][-4] + (i-tracks_all[j][-1][-3])*tracks_all[j][-1][-1])
+            if i%10 == 9:
+                print(f'\rTracking slide {i+1} out of {len(rr)}', end='\r')
         
         tracks = []
         for track in tracks_all:
