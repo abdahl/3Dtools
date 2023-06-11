@@ -26,7 +26,7 @@ import scipy.ndimage
 import os
 
 class FiberTracker:
-    def __init__(self, int_thres=0.1, max_jump=5, max_skip=5, peak_sigma=2, center_sigma=1.5, momentum=0.1, track_min_length=3):
+    def __init__(self, int_thres=0.1, max_jump=5, min_dist=5, max_skip=5, peak_sigma=2, center_sigma=1.5, momentum=0.1, track_min_length=3):
         '''
         Initialization of the fiber tracker. The fiber tracker tracks fibers in the z-direction.
 
@@ -36,6 +36,8 @@ class FiberTracker:
             Threshold for minimum intensity value of areas containing fibers. The default is 0.1.
         max_jump : float, optional
             Maximum distance between detected points in two consecutive frames. Threshold in pixels. The default is 5.
+        min_dist : float, optional
+            Minimum distance between detected points within the same frame. Threshold in pixels. The default is 5.
         max_skip : int, optional
             Maximum number of frames along one track where no points are detected. The default is 5.
         peak_sigma : float, optional
@@ -61,6 +63,10 @@ class FiberTracker:
         self.max_jump = max_jump**2 # not move more than max_jump pixels (using squared distance)
         if self.max_jump < 1: # should be at least 1 pixel
             self.max_jump = 1
+        
+        self.min_dist = min_dist**2 # minimum distance between points in a frame more than min_dist pixels (using squared distance)
+        if self.min_dist < 1: # should be at least 1 pixel
+            self.min_dist = 1
         
         self.max_skip = max_skip # maximum number of slides that can be skipped in a track. If set to 0, then no slides can be skipped.
         if self.max_skip < 0:
@@ -169,7 +175,7 @@ class FiberTracker:
 
     def remove_close_points(self, r, c, im):
         '''
-        Removes points that are closer than max_jump and keeps the point with the highest response.
+        Removes points that are closer than min_dist and keeps the point with the highest response.
 
         Parameters
         ----------
@@ -193,9 +199,9 @@ class FiberTracker:
             
         keep = np.ones(len(d), dtype=bool)
         
-        id_max_jump = np.where(d<self.max_jump)
+        id_min_dist = np.where(d<self.min_dist)
         
-        for ida, idb in zip(id_max_jump[0], id_max_jump[1]):
+        for ida, idb in zip(id_min_dist[0], id_min_dist[1]):
             if im[r[ida], c[ida]] > im[r[idb], c[idb]]:
                 keep[idb] = 0
             else:
