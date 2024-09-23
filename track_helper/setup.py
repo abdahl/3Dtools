@@ -17,4 +17,9 @@ setup(name='track_helper',
     author='Anders Dahl',
     author_email='abda@dtu.dk',
     license='GNU GPSv3',
+    install_requires=[
+          'tifffile',
+          'numpy',
+          'matplotlib'
+      ],
     zip_safe=False)
