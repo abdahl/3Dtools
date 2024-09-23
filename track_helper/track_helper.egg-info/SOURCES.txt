@@ -1,7 +1,0 @@
-setup.py
-track_helper.py
-track_helper.egg-info/PKG-INFO
-track_helper.egg-info/SOURCES.txt
-track_helper.egg-info/dependency_links.txt
-track_helper.egg-info/not-zip-safe
-track_helper.egg-info/top_level.txt
