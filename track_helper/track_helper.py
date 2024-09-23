@@ -169,8 +169,8 @@ class FiberTracker:
         ca = np.array(ca)
         rb = np.array(rb)
         cb = np.array(cb)
-        return ((ra.reshape(-1,1)@np.ones((1,len(rb))) - np.ones((len(ra),1))@(rb.reshape(1,-1)))**2 + 
-                (ca.reshape(-1,1)@np.ones((1,len(cb))) - np.ones((len(ca),1))@(cb.reshape(1,-1)))**2)
+        return ((np.outer(ra, np.ones((1,len(rb)))) - np.outer(np.ones((len(ra),1)), rb))**2 + 
+                (np.outer(ca, np.ones((1,len(cb)))) - np.outer(np.ones((len(ca),1)), cb))**2)
 
 
     def remove_close_points(self, r, c, im):
