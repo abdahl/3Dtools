@@ -20,6 +20,7 @@ setup(name='track_helper',
     install_requires=[
           'tifffile',
           'numpy',
-          'matplotlib'
+          'matplotlib',
+          'scipy'
       ],
     zip_safe=False)
